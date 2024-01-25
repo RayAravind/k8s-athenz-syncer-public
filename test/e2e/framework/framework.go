@@ -8,8 +8,10 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/yahoo/athenz/clients/go/zms"
 	athenzClientset "github.com/yahoo/k8s-athenz-syncer/pkg/client/clientset/versioned"
@@ -154,16 +156,16 @@ func teardown() error {
 		return err
 	}
 	trustroleName := zms.EntityName(f.TrustRole)
-	err = f.ZMSClient.DeleteRole(domain, trustroleName, "")
-	if err != nil {
-		log.Errorf("Unable to delete test2 role: %v", err)
-		return err
-	}
-	err = f.CRClient.RemoveAthenzDomain(context.TODO(), f.TrustDomain)
-	if err != nil {
-		log.Errorf("Unable to remove created athenzdomains: %v", err)
-		return err
-	}
+	err = wait.PollImmediate(time.Second*30, time.Minute*3, func() (done bool, err error) {
+		_, exists, _ := f.CRClient.GetCRByName(f.TrustDomain)
+		if exists {
+			_ = f.ZMSClient.DeleteRole(domain, trustroleName, "")
+			_ = f.CRClient.RemoveAthenzDomain(context.TODO(), f.TrustDomain)
+			return false, nil
+		}
+		log.Println("domain deleted")
+		return true, nil
+	})
 	deletePolicy := metav1.DeletePropagationForeground
 	deleteOptions := &metav1.DeleteOptions{
 		PropagationPolicy: &deletePolicy,
